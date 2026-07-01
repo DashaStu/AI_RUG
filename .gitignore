@@ -2,4 +2,5 @@ venv/
 db_data/
 *.db
 temp_uploads
-__pychace__/
+__pycache__/
+.idea/

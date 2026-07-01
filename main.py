@@ -7,12 +7,13 @@ import shutil
 from sqlalchemy import select
 
 from auth import get_password_hash
-from ingest import start_ingestion, ask_question
+from ingest import start_ingestion, ask_question, redis_client
 from schemas import UserCreate, UserLogin, User as UserBase
 from model import User
 from database import get_db
 from database import engine, Base
 import auth
+import json
 app = FastAPI()
 
 UPLOAD_DIR = "temp_uploads"
@@ -53,6 +54,10 @@ async def login_user(form_data: OAuth2PasswordRequestForm = Depends(),
 async def upload_document(background_tasks: BackgroundTasks,
                           file: UploadFile = File(...),
                           current_user: User = Depends(auth.get_current_user)):
+    keys_to_delete = redis_client.keys(f"user:{current_user.id}:query:*")
+    if keys_to_delete:
+        redis_client.delete(*keys_to_delete)
+
     file_path = os.path.join(UPLOAD_DIR, f"{current_user.id}_{file.filename}")
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -65,9 +70,17 @@ async def upload_document(background_tasks: BackgroundTasks,
 
 @app.post("/ask")
 async def ask_questions(question: str = Form(...), current_user: User = Depends(auth.get_current_user)):
+    clean_question = question.strip().lower()
+    cache_key = f"user:{current_user.id}:query:{clean_question}"
+    cached_answer = redis_client.get(cache_key)
+    if cached_answer:
+        data = json.loads(cached_answer)
+        return {"answer": data["answer"], "sources": data["sources"]}
     try:
-        result = await ask_question(current_user.id, question)
-        return {"answer": result}
+        result, source = await ask_question(current_user.id, question)
+        redis_client.set(cache_key, json.dumps({"answer": result, "sources": source}), ex=3600)
+
+        return {"answer": result, "sources": source}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"error: {str(e)}")
 

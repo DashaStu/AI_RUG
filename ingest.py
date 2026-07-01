@@ -9,8 +9,17 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_chroma import Chroma
 from langchain.chains import RetrievalQA
+import redis
 
 embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+
+redis_client = redis.Redis(
+    host="localhost",
+    port=6379,
+    db=0,
+    protocol=2,
+    decode_responses=True
+)
 
 async def start_ingestion(client_id: int, file: str):
 
@@ -29,6 +38,7 @@ async def start_ingestion(client_id: int, file: str):
     texts = text_splitter.split_documents(documents)
     for text in texts:
         text.metadata["user_id"] = client_id
+        text.metadata["file_name"] = os.path.basename(file)
 
     vector_db = Chroma(
         embedding_function=embeddings,
@@ -51,9 +61,20 @@ async def ask_question(client_id: int, question: str):
     qa_chain = RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff",
-        retriever=retriever
+        retriever=retriever,
+        return_source_documents=True
     )
 
     response = qa_chain.invoke(question)
-    return response["result"]
+
+    answer = response.get("result")
+    source = response.get("source_documents", [])
+    sources = []
+
+    for text in source:
+        name = text.metadata.get("file_name", "No source")
+        if name not in sources:
+            sources.append(name)
+    
+    return answer, sources
 

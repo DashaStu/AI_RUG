@@ -13,8 +13,9 @@ import redis
 
 embeddings = OllamaEmbeddings(model="mxbai-embed-large")
 
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 redis_client = redis.Redis(
-    host="localhost",
+    host=REDIS_HOST,
     port=6379,
     db=0,
     protocol=2,
